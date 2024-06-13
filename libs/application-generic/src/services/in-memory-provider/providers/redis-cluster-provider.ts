@@ -22,6 +22,7 @@ const TTL_VARIANT_PERCENTAGE = 0.1;
 interface IRedisClusterConfig {
   connectTimeout?: string;
   family?: string;
+  hosts?: string;
   host?: string;
   keepAlive?: string;
   keyPrefix?: string;
@@ -35,6 +36,7 @@ export interface IRedisClusterProviderConfig {
   connectTimeout: number;
   family: number;
   host?: string;
+  hosts?: string[];
   instances?: ClusterNode[];
   keepAlive: number;
   keyPrefix: string;
@@ -48,6 +50,7 @@ export const getRedisClusterProviderConfig =
   (): IRedisClusterProviderConfig => {
     const redisClusterConfig: IRedisClusterConfig = {
       host: convertStringValues(process.env.REDIS_CLUSTER_SERVICE_HOST),
+      hosts: convertStringValues(process.env.REDIS_CLUSTER_SERVICE_HOSTS),
       ports: convertStringValues(process.env.REDIS_CLUSTER_SERVICE_PORTS),
       ttl: convertStringValues(process.env.REDIS_CLUSTER_TTL),
       password: convertStringValues(process.env.REDIS_CLUSTER_PASSWORD),
@@ -61,6 +64,9 @@ export const getRedisClusterProviderConfig =
     };
 
     const host = redisClusterConfig.host;
+    const hosts = redisClusterConfig.hosts
+      ? JSON.parse(redisClusterConfig.hosts)
+      : [];
     const ports = redisClusterConfig.ports
       ? JSON.parse(redisClusterConfig.ports)
       : [];
@@ -78,13 +84,18 @@ export const getRedisClusterProviderConfig =
     const ttl = redisClusterConfig.ttl
       ? Number(redisClusterConfig.ttl)
       : DEFAULT_TTL_SECONDS;
-
-    const instances: ClusterNode[] = ports.map(
-      (port: number): ClusterNode => ({ host, port })
-    );
+    const instances: ClusterNode[] = hosts
+      ? hosts.map((_host: string, index: number) => {
+          return {
+            host: _host,
+            port: ports.length > index ? ports[index] : ports[0],
+          };
+        })
+      : ports.map((port: number): ClusterNode => ({ host, port }));
 
     return {
       host,
+      hosts,
       ports,
       instances,
       password,
@@ -99,23 +110,28 @@ export const getRedisClusterProviderConfig =
 export const getRedisCluster = (
   enableAutoPipelining?: boolean
 ): Cluster | undefined => {
-  const { instances } = getRedisClusterProviderConfig();
+  const { instances, password } = getRedisClusterProviderConfig();
 
   const options: ClusterOptions = {
     enableAutoPipelining: enableAutoPipelining ?? false,
     enableOfflineQueue: false,
     enableReadyCheck: true,
     scaleReads: 'slave',
+    dnsLookup: (address, callback) => callback(null, address),
+    redisOptions: {
+      password: password,
+    },
     /*
      *  Disabled in Prod as affects performance
      */
     showFriendlyErrorStack: process.env.NODE_ENV !== 'production',
-    slotsRefreshTimeout: 2000,
+    slotsRefreshTimeout: 5000,
   };
 
   Logger.log(
     `Initializing Redis Cluster Provider with ${instances?.length} instances and auto-pipelining as ${options.enableAutoPipelining}`
   );
+  console.log('redisClusterConfig', instances, options);
 
   if (instances && instances.length > 0) {
     return new Redis.Cluster(instances, options);
@@ -131,7 +147,7 @@ export const validateRedisClusterProviderConfig = (): boolean => {
     config.ports.length > 0 &&
     config.ports.every((port: number) => Number.isInteger(port));
 
-  return !!config.host && validPorts;
+  return !!(config.host || config.hosts) && validPorts;
 };
 
 export const isClientReady = (status: string): boolean =>
