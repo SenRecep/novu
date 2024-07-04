@@ -1,1 +1,2 @@
-export * from './novu';
+export { Novu } from './novu';
+export { NovuUI } from './ui';
