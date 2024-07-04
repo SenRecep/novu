@@ -131,7 +131,6 @@ export const getRedisCluster = (
   Logger.log(
     `Initializing Redis Cluster Provider with ${instances?.length} instances and auto-pipelining as ${options.enableAutoPipelining}`
   );
-  console.log('redisClusterConfig', instances, options);
 
   if (instances && instances.length > 0) {
     return new Redis.Cluster(instances, options);
